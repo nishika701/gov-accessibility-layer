@@ -1,4 +1,17 @@
+import sys
 import ollama
+
+# Configure console encoding for Windows to prevent UnicodeEncodeError
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 MODEL_NAME = "llama3.1"
 
@@ -23,11 +36,23 @@ Example of correct Hindi output style (Devanagari script, NOT Romanized):
 Now respond in the same script style as the example above, but in {target_language}.
 """
 
-    response = ollama.chat(
-        model=MODEL_NAME,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response["message"]["content"]
+    try:
+        response = ollama.chat(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response["message"]["content"]
+    except Exception as e:
+        err_msg = str(e)
+        if "connect" in err_msg.lower() or "connection" in err_msg.lower():
+            raise ConnectionError(
+                f"Could not connect to Ollama service. Please ensure Ollama is running (`ollama serve` or open Ollama app). Details: {e}"
+            ) from e
+        elif "not found" in err_msg.lower() and MODEL_NAME in err_msg:
+            raise RuntimeError(
+                f"Model '{MODEL_NAME}' is not found in Ollama. Please run `ollama pull {MODEL_NAME}` first."
+            ) from e
+        raise
 
 
 if __name__ == "__main__":
