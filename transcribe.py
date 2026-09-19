@@ -57,26 +57,16 @@ TRANSCRIBE_LANGUAGE_CODES = {
 
 def get_aws_client(service_name: str, region_name: str = None):
     """
-    Initializes and returns a boto3 client (e.g. 'transcribe' or 's3').
+    Initializes and returns a boto3 client using AWS IAM Identity Center (SSO).
     """
-    region = (
-        region_name
-        or os.getenv("AWS_DEFAULT_REGION")
-        or os.getenv("AWS_REGION")
-        or "ap-south-1"
+    region = region_name or "us-east-1"
+
+    session = boto3.Session(
+        profile_name="gov-accessibility",
+        region_name=region
     )
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_session_token = os.getenv("AWS_SESSION_TOKEN")
 
-    client_kwargs = {"region_name": region}
-    if aws_access_key and aws_secret_key:
-        client_kwargs["aws_access_key_id"] = aws_access_key
-        client_kwargs["aws_secret_access_key"] = aws_secret_key
-        if aws_session_token:
-            client_kwargs["aws_session_token"] = aws_session_token
-
-    return boto3.client(service_name, **client_kwargs)
+    return session.client(service_name)
 
 
 def upload_audio_to_s3(file_path: str, bucket_name: str, object_key: str, region_name: str = None) -> str:
