@@ -1,69 +1,129 @@
-import sys
-import ollama
-
-# Configure console encoding for Windows to prevent UnicodeEncodeError
-if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-if sys.stderr and hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-MODEL_NAME = "llama3.1"
+import json
+import requests
 
 
-def simplify_text(text: str, target_language: str = "Hindi") -> str:
-    prompt = f"""You are helping an ordinary citizen understand a confusing government document or form.
+OLLAMA_URL = "http://localhost:11434/api/generate"
+MODEL = "llama3.1"
 
-ORIGINAL TEXT:
-\"\"\"{text}\"\"\"
 
-Your task:
-1. Explain what this means in simple, everyday {target_language} — avoid bureaucratic or legal jargon.
-2. Clearly call out any of the following, if present: deadlines, fees/amounts, required documents, eligibility conditions.
-3. Keep it short — a few sentences, not an essay.
-4. If anything in the original text is genuinely ambiguous or unclear, say so honestly instead of guessing.
+def call_llm(prompt):
+    response = requests.post(
+        OLLAMA_URL,
+        json={
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": False
+        },
+        timeout=120
+    )
 
-Respond ONLY in {target_language}, written in its native/proper script (e.g. Devanagari for Hindi, Tamil script for Tamil, Telugu script for Telugu) — never Romanized/transliterated text. Do not include English unless a proper noun requires it.
+    response.raise_for_status()
 
-Example of correct Hindi output style (Devanagari script, NOT Romanized):
-"आपको फॉर्म जमा करना होगा। इसके साथ पते और उम्र का प्रमाण देना होगा। समय सीमा 30 दिनों की है और शुल्क 200 रुपये है।"
+    return response.json()["response"]
 
-Now respond in the same script style as the example above, but in {target_language}.
+
+def simplify_text(text):
+    prompt = f"""
+You are an assistant helping people understand government documents.
+
+Simplify the following document into very simple everyday language.
+
+Rules:
+- Use ONLY information present in the document.
+- Do not invent information.
+- Explain difficult government/legal terms simply.
+- Keep important dates, amounts, requirements and conditions.
+- Make it understandable for a person with low literacy.
+- Do not remove important information.
+
+DOCUMENT:
+{text}
+
+Return only the simplified explanation.
 """
 
+    return call_llm(prompt)
+
+
+def analyze_document_with_llm(text):
+    prompt = f"""
+Analyze the following government document.
+
+Return ONLY valid JSON in this exact structure:
+
+{{
+    "summary": "",
+    "important_facts": [],
+    "requirements": [],
+    "questions": [
+        {{
+            "question": "",
+            "expected_answer": "",
+            "explanation": ""
+        }}
+    ]
+}}
+
+Rules:
+- Use ONLY information from the document.
+- Do not invent facts.
+- summary should be simple.
+- important_facts should contain important dates, conditions, amounts,
+  eligibility rules or other critical information.
+- requirements should contain documents, actions or conditions required.
+- Generate 2 to 5 questions that test whether the user understood
+  important information.
+- Questions must be answerable from the document.
+- expected_answer must contain the correct answer.
+- explanation should explain the relevant information simply.
+
+DOCUMENT:
+{text}
+"""
+
+    raw_response = call_llm(prompt)
+
     try:
-        response = ollama.chat(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response["message"]["content"]
-    except Exception as e:
-        err_msg = str(e)
-        if "connect" in err_msg.lower() or "connection" in err_msg.lower():
-            raise ConnectionError(
-                f"Could not connect to Ollama service. Please ensure Ollama is running (`ollama serve` or open Ollama app). Details: {e}"
-            ) from e
-        elif "not found" in err_msg.lower() and MODEL_NAME in err_msg:
-            raise RuntimeError(
-                f"Model '{MODEL_NAME}' is not found in Ollama. Please run `ollama pull {MODEL_NAME}` first."
-            ) from e
-        raise
+        return json.loads(raw_response)
+    except json.JSONDecodeError:
+        print("LLM did not return valid JSON.")
+        print(raw_response)
+
+        return {
+            "summary": raw_response,
+            "important_facts": [],
+            "requirements": [],
+            "questions": []
+        }
+
+
+def generate_questions(text):
+    """
+    Generate document-specific comprehension questions.
+    """
+
+    analysis = analyze_document_with_llm(text)
+
+    return analysis.get("questions", [])
 
 
 if __name__ == "__main__":
-    sample_text = (
-        "Applicants must submit Form LLD-1 along with valid proof of address "
-        "and proof of age within 30 days of the date of application. A fee of "
-        "Rs. 200 is applicable. Failure to submit within the stipulated time "
-        "will result in cancellation of the application."
-    )
 
-    print("=== ORIGINAL ===")
-    print(sample_text)
-    print("\n=== SIMPLIFIED (Hindi) ===")
-    print(simplify_text(sample_text, "Hindi"))
+    sample_text = """
+    Applicants must submit the application before 30 September.
+    The applicant must provide proof of identity and proof of address.
+    Applications submitted after the deadline may not be accepted.
+    """
+
+    print("\n=== SIMPLIFIED DOCUMENT ===")
+
+    simplified = simplify_text(sample_text)
+    print(simplified)
+
+    print("\n=== QUESTIONS ===")
+
+    questions = generate_questions(sample_text)
+
+    for i, question in enumerate(questions, 1):
+        print(f"\nQuestion {i}: {question['question']}")
+        print(f"Expected answer: {question['expected_answer']}")

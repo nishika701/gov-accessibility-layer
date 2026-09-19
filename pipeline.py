@@ -1,169 +1,211 @@
-import os
-import sys
-from pathlib import Path
-
-# Configure console encoding for Windows to prevent UnicodeEncodeError
-if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-if sys.stderr and hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-from simplify import simplify_text
-from tts import text_to_speech
-from document_processor import extract_text_from_pdf
-
-# Optional import of Amazon Transcribe module
-try:
-    from transcribe import transcribe_audio, SUPPORTED_MEDIA_FORMATS
-    HAS_TRANSCRIBE = True
-except ImportError:
-    HAS_TRANSCRIBE = False
-    SUPPORTED_MEDIA_FORMATS = {}
+from aws_document_processor import extract_text_from_s3
+from document_analyzer import analyze_document
+from retrieval import retrieve
+from simplify import simplify_text, analyze_document_with_llm
+from understanding_check import check_answer
 
 
-def process(
-    text: str,
-    target_language: str = "Hindi",
-    audio_output_path: str = "output.mp3",
-    provider: str = None,
-) -> dict:
-    """
-    Simplifies government text into the target language and generates audio.
+BUCKET_NAME = "gov-accessibility-layer-devforge-237303364767-us-east-1-an"
 
-    :param text: Original government or administrative text.
-    :param target_language: Language to simplify and translate to (e.g. "Hindi", "English").
-    :param audio_output_path: Target filename/path for the output MP3.
-    :param provider: TTS provider ("auto", "polly", or "gtts").
-    :return: Dictionary containing original_text, simplified_text, language, and audio_path.
-    """
-    print(f"Simplifying text into {target_language}...")
-    simplified = simplify_text(text, target_language)
 
-    print(f"Generating audio ({audio_output_path})...")
-    audio_path = text_to_speech(
-        text=simplified,
-        language=target_language,
-        output_path=audio_output_path,
-        provider=provider,
+def process_document(object_key):
+
+    print("\n================================")
+    print("STEP 1: EXTRACTING DOCUMENT")
+    print("================================")
+
+    result = extract_text_from_s3(
+        bucket_name=BUCKET_NAME,
+        object_key=object_key
     )
 
+    text = result["text"]
+
+    print(f"Extracted {len(text)} characters.")
+
+
+    print("\n================================")
+    print("STEP 2: ANALYZING DOCUMENT")
+    print("================================")
+
+    document = analyze_document(text)
+
+    print(f"Detected {len(document['sections'])} sections.")
+    print(f"Detected {len(document['fields'])} possible fields.")
+
+
+    print("\n================================")
+    print("STEP 3: AI ANALYSIS")
+    print("================================")
+
+    ai_analysis = analyze_document_with_llm(text)
+
+    print("\nSUMMARY:")
+    print(ai_analysis.get("summary", ""))
+
+
+    print("\nIMPORTANT FACTS:")
+
+    for fact in ai_analysis.get("important_facts", []):
+        print(f"- {fact}")
+
+
+    print("\nREQUIREMENTS:")
+
+    for requirement in ai_analysis.get("requirements", []):
+        print(f"- {requirement}")
+
+
+    print("\nQUESTIONS:")
+
+    for i, question in enumerate(
+        ai_analysis.get("questions", []), 1
+    ):
+        print(f"{i}. {question['question']}")
+
+
     return {
-        "original_text": text,
-        "simplified_text": simplified,
-        "language": target_language,
-        "audio_path": audio_path,
+        "document": document,
+        "ai_analysis": ai_analysis,
+        "text": text
     }
 
 
-def process_file(
-    file_path: str,
-    target_language: str = "Hindi",
-    audio_output_path: str = "output.mp3",
-    provider: str = None,
-) -> dict:
-    """
-    Extracts text from a document (PDF or text file), simplifies it, and generates audio.
-    """
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Input file not found: {file_path}")
+def answer_document_question(
+    question,
+    sections,
+    user_answer,
+    expected_answer
+):
 
-    print(f"Reading document: {file_path}")
-    if path.suffix.lower() == ".pdf":
-        text = extract_text_from_pdf(str(path))
-    else:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            text = f.read().strip()
-
-    if not text:
-        raise ValueError(f"No text could be extracted from {file_path}")
-
-    return process(
-        text=text,
-        target_language=target_language,
-        audio_output_path=audio_output_path,
-        provider=provider,
+    relevant_sections = retrieve(
+        question,
+        sections,
+        top_k=3
     )
 
-
-def process_audio(
-    audio_path: str,
-    target_language: str = "Hindi",
-    audio_output_path: str = "output.mp3",
-    provider: str = None,
-    s3_bucket: str = None,
-) -> dict:
-    """
-    Transcribes spoken audio using Amazon Transcribe, simplifies the transcribed text,
-    and generates spoken audio in the target language.
-    """
-    if not HAS_TRANSCRIBE:
-        raise ImportError("Transcribe module is not available. Please verify transcribe.py.")
-
-    print(f"Transcribing audio input: {audio_path}...")
-    transcribed_text = transcribe_audio(
-        audio_path=audio_path,
-        language=target_language,
-        bucket_name=s3_bucket,
+    result = check_answer(
+        user_answer,
+        expected_answer
     )
-    print(f"Transcribed Text: {transcribed_text}")
 
-    return process(
-        text=transcribed_text,
-        target_language=target_language,
-        audio_output_path=audio_output_path,
-        provider=provider,
-    )
+    if result:
+        return {
+            "correct": True,
+            "message": "Correct. You understood the information.",
+            "relevant_sections": relevant_sections
+        }
+
+    return {
+        "correct": False,
+        "message": (
+            "That is not quite correct. "
+            "Let me explain that part again."
+        ),
+        "relevant_sections": relevant_sections
+    }
+
+
+def run_understanding_check(result):
+
+    questions = result["ai_analysis"].get("questions", [])
+    sections = result["document"].get("sections", [])
+
+    if not questions:
+        print("\nNo questions were generated.")
+        return
+
+    print("\n================================")
+    print("UNDERSTANDING CHECK")
+    print("================================")
+
+    for i, question_data in enumerate(questions, 1):
+
+        question = question_data["question"]
+        expected_answer = question_data["expected_answer"]
+        explanation = question_data["explanation"]
+
+        print(f"\nQuestion {i}: {question}")
+
+        user_answer = input("Your answer: ")
+
+        check = answer_document_question(
+            question,
+            sections,
+            user_answer,
+            expected_answer
+        )
+
+        if check["correct"]:
+
+            print("\n✓ Correct!")
+
+        else:
+
+            print("\nLet's go through that again.")
+            print(explanation)
+
+            retry = input("\nTry answering again: ")
+
+            retry_check = check_answer(
+                retry,
+                expected_answer
+            )
+
+            if retry_check:
+                print("\n✓ Correct!")
+            else:
+                print("\nWe'll move to the next question.")
+
+
+def run_voice_loop(result):
+
+    """
+    Placeholder for the AWS Polly + Transcribe voice loop.
+
+    The actual AWS calls can be connected here without
+    changing the document-processing pipeline.
+    """
+
+    print("\n================================")
+    print("VOICE MODE")
+    print("================================")
+
+    print("Document is ready for voice interaction.")
+
+    while True:
+
+        user_input = input(
+            "\nType your question "
+            "(or type 'exit'): "
+        )
+
+        if user_input.lower() == "exit":
+            break
+
+        sections = result["document"]["sections"]
+
+        relevant = retrieve(
+            user_input,
+            sections,
+            top_k=3
+        )
+
+        context = "\n".join(relevant)
+
+        print("\nRelevant document information:")
+        print(context)
+
+        print("\nVoice response would be generated here using Polly.")
 
 
 if __name__ == "__main__":
-    # Support optional CLI arguments:
-    # python pipeline.py [input_text_or_file] [language] [output_path] [provider]
-    sample_text = (
-        "Applicants must submit Form LLD-1 along with valid proof of address "
-        "and proof of age within 30 days of the date of application. A fee of "
-        "Rs. 200 is applicable. Failure to submit within the stipulated time "
-        "will result in cancellation of the application."
-    )
 
-    input_arg = sys.argv[1] if len(sys.argv) > 1 else None
-    language_arg = sys.argv[2] if len(sys.argv) > 2 else "Hindi"
-    output_arg = sys.argv[3] if len(sys.argv) > 3 else "output.mp3"
-    provider_arg = sys.argv[4] if len(sys.argv) > 4 else None
+    OBJECT_KEY = "CZ-Form-I.pdf"
 
-    if input_arg and os.path.isfile(input_arg):
-        ext = Path(input_arg).suffix.lower()
-        if ext in SUPPORTED_MEDIA_FORMATS:
-            result = process_audio(
-                audio_path=input_arg,
-                target_language=language_arg,
-                audio_output_path=output_arg,
-                provider=provider_arg,
-            )
-        else:
-            result = process_file(
-                file_path=input_arg,
-                target_language=language_arg,
-                audio_output_path=output_arg,
-                provider=provider_arg,
-            )
-    else:
-        text_to_process = input_arg if input_arg else sample_text
-        result = process(
-            text=text_to_process,
-            target_language=language_arg,
-            audio_output_path=output_arg,
-            provider=provider_arg,
-        )
+    result = process_document(OBJECT_KEY)
 
-    print("\n=== ORIGINAL / INPUT ===")
-    print(result["original_text"])
-    print("\n=== SIMPLIFIED ===")
-    print(result["simplified_text"])
-    print(f"\n=== AUDIO SAVED TO: {result['audio_path']} ===")
+    run_understanding_check(result)
+
+    # Enable later when the complete voice system is connected.
+    # run_voice_loop(result)
