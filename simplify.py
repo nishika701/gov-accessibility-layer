@@ -22,11 +22,11 @@ def call_llm(prompt):
     return response.json()["response"]
 
 
-def simplify_text(text):
+def simplify_text(text: str, target_language: str = "Hindi"):
     prompt = f"""
-You are an assistant helping people understand government documents.
+You are an assistant helping ordinary citizens understand confusing government documents.
 
-Simplify the following document into very simple everyday language.
+Simplify the following document into very simple everyday {target_language}.
 
 Rules:
 - Use ONLY information present in the document.
@@ -35,11 +35,13 @@ Rules:
 - Keep important dates, amounts, requirements and conditions.
 - Make it understandable for a person with low literacy.
 - Do not remove important information.
+- CRITICAL SCRIPT RULE: You MUST write ONLY in the native/proper script of {target_language} (e.g. Devanagari script for Hindi/Marathi, Telugu script for Telugu, Tamil script for Tamil, Bengali script for Bengali, Kannada script for Kannada, Gujarati script for Gujarati, Malayalam script for Malayalam).
+- NEVER use Romanized or English alphabet transliterations (e.g., NEVER write "Aapko", "Meeru", "Neengal" in Latin alphabet). Output the actual native alphabet characters directly.
 
 DOCUMENT:
 {text}
 
-Return only the simplified explanation.
+Return only the simplified explanation written in the native script of {target_language}.
 """
 
     return call_llm(prompt)
