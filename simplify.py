@@ -1,32 +1,48 @@
+import os
 import json
-import requests
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.1"
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError(
+            "GEMINI_API_KEY is not set. Please add GEMINI_API_KEY to your .env file."
+        )
+    return genai.Client(api_key=api_key)
 
 
-def call_llm(prompt):
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False
-        },
-        timeout=120
+def call_llm(prompt: str, json_mode: bool = False) -> str:
+    """
+    Call Gemini API with optional JSON structure enforcement.
+    """
+    client = get_gemini_client()
+    config = types.GenerateContentConfig()
+
+    if json_mode:
+        config.response_mime_type = "application/json"
+
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=config
     )
 
-    response.raise_for_status()
-
-    return response.json()["response"]
+    return response.text
 
 
-def simplify_text(text):
+def simplify_text(text: str, target_language: str = "Hindi") -> str:
     prompt = f"""
-You are an assistant helping people understand government documents.
+You are an assistant helping ordinary citizens understand confusing government documents.
 
-Simplify the following document into very simple everyday language.
+Simplify the following document into very simple everyday {target_language}.
 
 Rules:
 - Use ONLY information present in the document.
@@ -35,17 +51,18 @@ Rules:
 - Keep important dates, amounts, requirements and conditions.
 - Make it understandable for a person with low literacy.
 - Do not remove important information.
+- CRITICAL SCRIPT RULE: You MUST write ONLY in the native/proper script of {target_language} (e.g. Devanagari script for Hindi/Marathi, Telugu script for Telugu, Tamil script for Tamil, Bengali script for Bengali, Kannada script for Kannada, Gujarati script for Gujarati, Malayalam script for Malayalam).
+- NEVER use Romanized or English alphabet transliterations. Output the actual native alphabet characters directly.
 
 DOCUMENT:
 {text}
 
-Return only the simplified explanation.
+Return only the simplified explanation written in the native script of {target_language}.
 """
-
     return call_llm(prompt)
 
 
-def analyze_document_with_llm(text):
+def analyze_document_with_llm(text: str) -> dict:
     prompt = f"""
 Analyze the following government document.
 
@@ -80,15 +97,13 @@ Rules:
 DOCUMENT:
 {text}
 """
-
-    raw_response = call_llm(prompt)
+    raw_response = call_llm(prompt, json_mode=True)
 
     try:
         return json.loads(raw_response)
     except json.JSONDecodeError:
         print("LLM did not return valid JSON.")
         print(raw_response)
-
         return {
             "summary": raw_response,
             "important_facts": [],
@@ -97,18 +112,15 @@ DOCUMENT:
         }
 
 
-def generate_questions(text):
+def generate_questions(text: str):
     """
     Generate document-specific comprehension questions.
     """
-
     analysis = analyze_document_with_llm(text)
-
     return analysis.get("questions", [])
 
 
 if __name__ == "__main__":
-
     sample_text = """
     Applicants must submit the application before 30 September.
     The applicant must provide proof of identity and proof of address.
@@ -116,14 +128,14 @@ if __name__ == "__main__":
     """
 
     print("\n=== SIMPLIFIED DOCUMENT ===")
+    try:
+        simplified = simplify_text(sample_text)
+        print(simplified)
 
-    simplified = simplify_text(sample_text)
-    print(simplified)
-
-    print("\n=== QUESTIONS ===")
-
-    questions = generate_questions(sample_text)
-
-    for i, question in enumerate(questions, 1):
-        print(f"\nQuestion {i}: {question['question']}")
-        print(f"Expected answer: {question['expected_answer']}")
+        print("\n=== QUESTIONS ===")
+        questions = generate_questions(sample_text)
+        for i, question in enumerate(questions, 1):
+            print(f"\nQuestion {i}: {question['question']}")
+            print(f"Expected answer: {question['expected_answer']}")
+    except ValueError as e:
+        print(f"Configuration Error: {e}")
