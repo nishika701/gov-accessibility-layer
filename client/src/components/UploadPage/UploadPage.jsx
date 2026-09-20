@@ -1,6 +1,23 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useEffect } from 'react'
 import Modal from '../Modal/Modal'
 import { useLanguage } from '../../context/LanguageContext'
+import {
+  FileText,
+  FolderUp,
+  Paperclip,
+  Lightbulb,
+  Mic,
+  Square,
+  Volume2,
+  Play,
+  Pause,
+  User,
+  Landmark,
+  X,
+  AlertTriangle,
+  Zap,
+  CheckCircle2,
+} from 'lucide-react'
 import './UploadPage.css'
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +43,11 @@ function formatBytes(bytes) {
 function ValidationMessage({ result }) {
   if (!result) return null
 
-  const icons = { error: '⚠', warning: '⚡', success: '✓' }
+  const icons = {
+    error: <AlertTriangle size={16} strokeWidth={2} />,
+    warning: <Zap size={16} strokeWidth={2} />,
+    success: <CheckCircle2 size={16} strokeWidth={2} />,
+  }
   const cls   = { error: 'is-error', warning: 'is-warning', success: 'is-success' }
 
   return (
@@ -36,6 +57,7 @@ function ValidationMessage({ result }) {
     </div>
   )
 }
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Sidebar — Official Instructions & Service Status
@@ -69,46 +91,10 @@ function Sidebar({ t }) {
           </ul>
         </div>
       </div>
-
-      {/* Services status - Clean, official wording */}
-      <div className="sidebar-card">
-        <div className="sidebar-card-header">{t.sidebarStTitle}</div>
-        <div className="sidebar-card-body">
-          <ul className="sidebar-status-list">
-            <li>
-              <span>{t.stDocProcessing}</span>
-              <span>
-                <span className="status-dot online" aria-hidden="true" />
-                {t.stOperational}
-              </span>
-            </li>
-            <li>
-              <span>{t.stSimplification}</span>
-              <span>
-                <span className="status-dot online" aria-hidden="true" />
-                {t.stOperational}
-              </span>
-            </li>
-            <li>
-              <span>{t.stStorage}</span>
-              <span>
-                <span className="status-dot online" aria-hidden="true" />
-                {t.stOperational}
-              </span>
-            </li>
-            <li>
-              <span>{t.stOcr}</span>
-              <span>
-                <span className="status-dot online" aria-hidden="true" />
-                {t.stOperational}
-              </span>
-            </li>
-          </ul>
-        </div>
-      </div>
     </aside>
   )
 }
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Main UploadPage component
@@ -124,14 +110,29 @@ export default function UploadPage() {
   const [uploadResult, setUploadResult] = useState(null)
   const [modalOpen, setModalOpen]   = useState(false)
 
+  // Sync selected target language with the application language
+  useEffect(() => {
+    if (currentLanguage?.name) {
+      setTargetLangName(currentLanguage.name)
+    }
+  }, [currentLanguage])
+
   // Extracted text & audio state from /process
   const [extractedText, setExtractedText] = useState('')
   const [audioUrl, setAudioUrl]           = useState(null)
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
   const [toasts, setToasts]               = useState([])
 
+  // Voice Query (AWS Transcribe & Gemini Q&A)
+  const [isRecording, setIsRecording]     = useState(false)
+  const [voiceProcessing, setVoiceProcessing] = useState(false)
+  const [voiceQuery, setVoiceQuery]       = useState(null) // { question, answer, source }
+
   const inputRef = useRef(null)
   const audioPlayerRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+
 
   const showToast = useCallback((msg, type = 'error') => {
     const id = Date.now() + Math.random().toString(36).slice(2, 6)
@@ -144,6 +145,7 @@ export default function UploadPage() {
   const removeToast = (id) => {
     setToasts((prev) => prev.filter((item) => item.id !== id))
   }
+
 
   /**
    * Play audio given a base64 string or URL
@@ -264,6 +266,16 @@ export default function UploadPage() {
     setUploadResult(null)
     setExtractedText('')
     setAudioUrl(null)
+    setVoiceQuery(null)
+    if (mediaRecorderRef.current && isRecording) {
+      try {
+        mediaRecorderRef.current.stop()
+      } catch (e) {
+        // ignore
+      }
+    }
+    setIsRecording(false)
+    setVoiceProcessing(false)
     if (audioPlayerRef.current) {
       audioPlayerRef.current.pause()
       audioPlayerRef.current = null
@@ -278,6 +290,114 @@ export default function UploadPage() {
     removeFile()
     setTargetLangName(currentLanguage?.name || 'English')
   }
+
+  /* ── Voice Query (Microphone & AWS Transcribe) Handlers ─────────────────── */
+  const startRecording = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Your browser does not support audio recording.', 'error')
+        return
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+
+      // Choose mime type supported by browser
+      let mimeType = 'audio/webm'
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4'
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg'
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        // Stop all audio tracks to release microphone
+        stream.getTracks().forEach((track) => track.stop())
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' })
+        sendVoiceQuery(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      showToast('Microphone activated. Please speak your question clearly.', 'success')
+    } catch (err) {
+      console.error('Microphone access denied or error:', err)
+      showToast('Microphone access was denied or is unavailable. Please grant microphone permission.', 'error')
+      setIsRecording(false)
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const sendVoiceQuery = async (audioBlob) => {
+    if (!audioBlob || audioBlob.size === 0) {
+      showToast('No audio was recorded.', 'error')
+      return
+    }
+
+    setVoiceProcessing(true)
+    showToast('Transcribing your question with AWS Transcribe...', 'info')
+
+    try {
+      const formData = new FormData()
+      const ext = audioBlob.type.includes('ogg') ? 'ogg' : audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+      formData.append('file', audioBlob, `voice_question.${ext}`)
+      formData.append('document_context', extractedText)
+      formData.append('language', targetLangName)
+
+      const response = await fetch('/api/ask-voice', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || data.status !== 'success') {
+        const errorDetail = data?.detail || 'Failed to process voice query.'
+        showToast(errorDetail, 'error')
+        return
+      }
+
+      setVoiceQuery({
+        question: data.question || '',
+        answer: data.answer || '',
+        audioBase64: data.audio_base64 || null,
+        audioFormat: data.audio_format || 'audio/mp3',
+        source: data.transcribe_source || 'aws_transcribe',
+      })
+
+      // Auto-play the AI answer audio as soon as rendered (identical to /explain audio)
+      if (data.audio_base64) {
+        playAudio(data.audio_base64, data.audio_format || 'audio/mp3')
+      }
+
+      showToast('Question answered successfully!', 'success')
+    } catch (err) {
+      console.error('Voice query error:', err)
+      showToast(err.message || 'Error processing your voice question.', 'error')
+    } finally {
+
+      setVoiceProcessing(false)
+    }
+  }
+
+
 
   /* ── Submit & Process Pipeline ─────────────────────────────────────────── */
   const handleSubmit = async (e) => {
@@ -416,7 +536,9 @@ export default function UploadPage() {
           <div className="form-panel">
             {/* Panel header */}
             <div className="form-panel-header">
-              <span className="panel-icon" aria-hidden="true">📄</span>
+              <span className="panel-icon" aria-hidden="true">
+                <FileText size={18} />
+              </span>
               {t.formHeader}
             </div>
 
@@ -448,7 +570,7 @@ export default function UploadPage() {
                 />
 
                 <span className="drop-zone-icon" aria-hidden="true">
-                  {file ? '📄' : '📂'}
+                  {file ? <FileText size={42} strokeWidth={1.5} /> : <FolderUp size={42} strokeWidth={1.5} />}
                 </span>
 
                 {file ? (
@@ -473,7 +595,9 @@ export default function UploadPage() {
               {/* Selected file info row */}
               {file && (
                 <div className="file-info-row" aria-label="Selected file details">
-                  <span className="file-icon" aria-hidden="true">📎</span>
+                  <span className="file-icon" aria-hidden="true">
+                    <Paperclip size={18} />
+                  </span>
                   <span className="file-name">{file.name}</span>
                   <span className="file-size">{formatBytes(file.size)}</span>
                   <button
@@ -483,10 +607,11 @@ export default function UploadPage() {
                     aria-label={`${t.removeFile}: ${file.name}`}
                     title={t.removeFile}
                   >
-                    ✕
+                    <X size={16} strokeWidth={2} />
                   </button>
                 </div>
               )}
+
 
               {/* Validation feedback */}
               <ValidationMessage result={validation} />
@@ -559,14 +684,15 @@ export default function UploadPage() {
           >
             <div className="extracted-text-header">
               <div className="extracted-text-title">
-                <span aria-hidden="true">💡</span>
+                <Lightbulb size={18} className="text-amber-400" aria-hidden="true" />
                 <span>Document Explanation</span>
               </div>
               {audioUrl && (
                 <div className="audio-controls-group">
                   {isPlayingAudio && (
                     <span className="audio-playing-indicator" aria-live="polite">
-                      🔊 Playing Audio…
+                      <Volume2 size={15} aria-hidden="true" style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                      Playing Audio…
                     </span>
                   )}
                   <button
@@ -583,7 +709,17 @@ export default function UploadPage() {
                     title={isPlayingAudio ? "Pause Audio" : "Listen to Audio"}
                     aria-label={isPlayingAudio ? "Pause Audio" : "Listen to Audio"}
                   >
-                    {isPlayingAudio ? '⏸ Pause' : '▶ Listen'}
+                    {isPlayingAudio ? (
+                      <>
+                        <Pause size={14} aria-hidden="true" />
+                        <span>Pause</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play size={14} aria-hidden="true" />
+                        <span>Listen</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -591,6 +727,112 @@ export default function UploadPage() {
             <div className="extracted-text-body">
               <div className="rendered-document-content" tabIndex={0}>
                 {extractedText}
+              </div>
+            </div>
+
+            {/* ── Citizen Voice Assistant Section (AWS Transcribe + AI) ── */}
+            <div className="voice-assistant-section">
+              <div className="voice-assistant-header">
+                <span className="voice-header-icon" aria-hidden="true">
+                  <Mic size={22} />
+                </span>
+                <div>
+                  <h3 className="voice-assistant-title">Ask a Question by Voice</h3>
+                  <p className="voice-assistant-subtitle">
+                    Click the microphone at the bottom to ask your question. Amazon Transcribe converts your speech to text and AI provides the answer.
+                  </p>
+                </div>
+              </div>
+
+              {/* Conversation Display (Goes up above the microphone button) */}
+              {voiceQuery && (
+                <div className="voice-qa-card" role="region" aria-label="Voice Query Conversation">
+                  <div className="qa-bubble user-question">
+                    <div className="qa-label">
+                      <User size={14} aria-hidden="true" />
+                      <span>Your Question (Transcribed)</span>
+                    </div>
+                    <div className="qa-text">"{voiceQuery.question}"</div>
+                  </div>
+
+                  <div className="qa-bubble ai-answer">
+                    <div className="qa-label-row">
+                      <div className="qa-label">
+                        <Landmark size={14} aria-hidden="true" />
+                        <span>Official Assistant Answer</span>
+                      </div>
+                      {voiceQuery.audioBase64 && (
+                        <button
+                          type="button"
+                          className="btn-voice-audio-play"
+                          onClick={() => {
+                            if (isPlayingAudio && audioPlayerRef.current) {
+                              audioPlayerRef.current.pause()
+                              setIsPlayingAudio(false)
+                            } else {
+                              playAudio(voiceQuery.audioBase64, voiceQuery.audioFormat || 'audio/mp3')
+                            }
+                          }}
+                          aria-label={isPlayingAudio ? "Pause answer audio" : "Listen to answer audio"}
+                          title={isPlayingAudio ? "Pause Audio" : "Listen to Audio"}
+                        >
+                          {isPlayingAudio ? (
+                            <>
+                              <Pause size={12} aria-hidden="true" />
+                              <span>Pause</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={12} aria-hidden="true" />
+                              <span>Listen</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <div className="qa-text">{voiceQuery.answer}</div>
+                  </div>
+                </div>
+              )}
+
+              {voiceProcessing && (
+                <div className="voice-processing-status" role="status" aria-live="polite">
+                  <span className="spinner" aria-hidden="true" />
+                  <span>Transcribing with Amazon Transcribe and generating answer...</span>
+                </div>
+              )}
+
+              {/* Microphone Button at the last / bottom */}
+              <div className="voice-mic-container">
+                {!isRecording ? (
+                  <button
+                    type="button"
+                    className={`btn-voice-mic ${voiceProcessing ? 'loading' : ''}`}
+                    onClick={startRecording}
+                    disabled={voiceProcessing}
+                    aria-label="Click to start speaking your question"
+                  >
+                    <span className="mic-icon" aria-hidden="true">
+                      <Mic size={18} />
+                    </span>
+                    <span>{voiceProcessing ? 'Processing Speech...' : 'Click to Ask by Voice'}</span>
+                  </button>
+                ) : (
+                  <div className="recording-controls">
+                    <button
+                      type="button"
+                      className="btn-voice-mic is-recording"
+                      onClick={stopRecording}
+                      aria-label="Stop recording and get answer"
+                    >
+                      <span className="recording-pulse" aria-hidden="true" />
+                      <span className="mic-icon" aria-hidden="true">
+                        <Square size={16} fill="currentColor" />
+                      </span>
+                      <span>Listening... Click to Submit Question</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -616,12 +858,13 @@ export default function UploadPage() {
                 onClick={() => removeToast(toast.id)}
                 aria-label="Close notification"
               >
-                ✕
+                <X size={14} strokeWidth={2} />
               </button>
             </div>
           ))}
         </div>
       )}
+
     </>
   )
 }

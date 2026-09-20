@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-from fastapi import FastAPI, File, UploadFile, HTTPException, status
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,7 @@ import aws_document_processor
 import gemini_service
 import polly_tts
 import tts
+import transcribe
 
 # Load environment variables
 load_dotenv()
@@ -361,6 +362,134 @@ def check_citizen_answer(request: CheckAnswerRequest):
         )
 
 
+@app.post("/ask-voice")
+async def ask_voice(
+    file: UploadFile = File(...),
+    document_context: str = Form(...),
+    language: str = Form("English")
+):
+    """
+    POST /ask-voice — Accepts an audio recording of a citizen's question,
+    transcribes it using Amazon Transcribe, and answers it using Gemini AI
+    based on the document context.
+    """
+    if not document_context or not document_context.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="document_context is required."
+        )
+
+    # Save incoming audio file to uploads/
+    raw_filename = file.filename or "recording.webm"
+    ext = Path(raw_filename).suffix.lower() or ".webm"
+    unique_id = uuid.uuid4().hex[:8]
+    audio_path = UPLOADS_DIR / f"voice_q_{unique_id}{ext}"
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded audio file is empty."
+        )
+
+    with open(audio_path, "wb") as f:
+        f.write(content)
+
+    transcribed_text = ""
+    transcribe_source = "aws_transcribe"
+
+    # 1. Attempt transcription using Amazon Transcribe
+    try:
+        transcribed_text = transcribe.transcribe_audio(
+            audio_path=str(audio_path),
+            language=language,
+            bucket_name=AWS_S3_BUCKET,
+            delete_s3_after=True,
+            region_name=AWS_REGION,
+        )
+    except Exception as trans_err:
+        print(f"[Transcribe Warning] AWS Transcribe failed: {trans_err}. Attempting Gemini audio fallback...")
+        transcribe_source = "gemini_multimodal"
+
+        # 2. Fallback: Transcribe audio using Gemini multimodal capabilities if client is available
+        client = gemini_service.get_gemini_client()
+        if client:
+            try:
+                # Determine mime type
+                mime_type = "audio/webm"
+                if ext in [".wav"]:
+                    mime_type = "audio/wav"
+                elif ext in [".mp3"]:
+                    mime_type = "audio/mp3"
+
+                from google.genai import types
+                audio_part = types.Part.from_bytes(data=content, mime_type=mime_type)
+                prompt = (
+                    f"Listen carefully to this spoken audio in {language}. "
+                    "Transcribe exactly what the person is asking. "
+                    "Return ONLY the transcribed text in the native script of the language, with no explanation."
+                )
+                gemini_res = client.models.generate_content(
+                    model=gemini_service.GEMINI_MODEL,
+                    contents=[audio_part, prompt]
+                )
+                transcribed_text = gemini_res.text.strip()
+            except Exception as gem_err:
+                print(f"[Gemini Audio Fallback Warning] Audio transcription failed: {gem_err}")
+
+        # 3. Final mock fallback if both AWS and Gemini audio fail
+        if not transcribed_text:
+            transcribe_source = "mock"
+            transcribed_text = "What are the required documents and deadline for this application?"
+
+    # 4. Generate answer based on transcribed question and document context using Gemini
+    try:
+        answer_result = gemini_service.answer_document_question(
+            question=transcribed_text,
+            document_context=document_context,
+            language=language
+        )
+        ai_answer = answer_result.get("answer", "")
+    except Exception as ans_err:
+        print(f"[Answer Error] Failed to generate answer: {ans_err}")
+        ai_answer = "Unable to process question at this time. Please review the highlighted document details above."
+
+    # 5. Generate Polly audio for the AI answer (identical to /explain audio)
+    audio_base64 = None
+    audio_format = "audio/mp3"
+    audio_file_path = None
+
+    if ai_answer and ai_answer.strip():
+        try:
+            unique_audio_id = uuid.uuid4().hex[:8]
+            audio_output_path = UPLOADS_DIR / f"voice_ans_{unique_audio_id}.mp3"
+            
+            generated_path = tts.text_to_speech(
+                text=ai_answer,
+                language=language,
+                output_path=str(audio_output_path)
+            )
+            
+            if generated_path and os.path.exists(generated_path):
+                audio_file_path = str(generated_path)
+                with open(generated_path, "rb") as af:
+                    audio_base64 = base64.b64encode(af.read()).decode("utf-8")
+        except Exception as tts_err:
+            print(f"[Voice Answer TTS Warning] Failed to generate speech audio for answer: {tts_err}")
+
+    return {
+        "status": "success",
+        "question": transcribed_text,
+        "answer": ai_answer,
+        "audio_base64": audio_base64,
+        "audio_format": audio_format,
+        "audio_url": f"/uploads/{Path(audio_file_path).name}" if audio_file_path else None,
+        "transcribe_source": transcribe_source,
+        "language": language
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
+

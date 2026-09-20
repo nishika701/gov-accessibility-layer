@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useLanguage } from '../../context/LanguageContext'
+import { Compass } from 'lucide-react'
 import './LanguagePicker.css'
 
 export default function LanguagePicker() {
@@ -24,7 +25,9 @@ export default function LanguagePicker() {
         aria-labelledby="lang-picker-title"
       >
         <div className="lang-picker-header">
-          <span className="lang-picker-emblem" aria-hidden="true">☸</span>
+          <span className="lang-picker-emblem" aria-hidden="true">
+            <Compass size={28} strokeWidth={1.8} />
+          </span>
           <div className="lang-picker-titles">
             <h2 id="lang-picker-title">{t.lpTitle || 'Select Your Language'}</h2>
             <p>{t.lpSubtitle || 'Choose your preferred language to use this portal'}</p>

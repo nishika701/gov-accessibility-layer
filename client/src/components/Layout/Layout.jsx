@@ -1,5 +1,6 @@
 import './Layout.css'
 import { useLanguage } from '../../context/LanguageContext'
+import { Globe, Compass } from 'lucide-react'
 
 /**
  * Layout
@@ -18,7 +19,9 @@ export default function Layout({ children }) {
       {/* ── Official Site Header ───────────────────────────────── */}
       <header className="site-header" role="banner">
         <div className="header-top">
-          <span className="header-emblem" aria-hidden="true">☸</span>
+          <span className="header-emblem" aria-hidden="true">
+            <Compass size={28} strokeWidth={1.8} />
+          </span>
           <div className="header-titles">
             <p className="ministry">{t.ministry}</p>
             <h1>{t.projectName}</h1>
@@ -32,10 +35,12 @@ export default function Layout({ children }) {
               title={t.changeLanguage}
               aria-label={t.changeLanguage}
             >
-              🌐 {currentLanguage?.native || 'Language'}
+              <Globe size={16} aria-hidden="true" />
+              <span>{currentLanguage?.native || 'Language'}</span>
             </button>
           </div>
         </div>
+
 
         {/* ── Official Navigation ─────────────────────────────── */}
         <nav className="site-nav" aria-label="Main navigation">

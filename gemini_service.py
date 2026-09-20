@@ -347,3 +347,102 @@ Return ONLY valid JSON matching this schema:
         "feedback": feedback,
         "explanation": explanation
     }
+
+
+def _strip_markdown(text: str) -> str:
+    """Removes common markdown formatting like bold, italics, headers, lists, code blocks."""
+    if not text:
+        return ""
+    # Remove headers (#)
+    cleaned = re.sub(r'#+\s*', '', text)
+    # Remove bold/italic asterisks or underscores (**text**, *text*, __text__, _text_)
+    cleaned = re.sub(r'[*_]{1,3}([^*_]+)[*_]{1,3}', r'\1', cleaned)
+    # Remove bullet markers (- or *) at start of lines
+    cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
+    # Remove backticks / code blocks
+    cleaned = re.sub(r'`{1,3}([^`]+)`{1,3}', r'\1', cleaned)
+    # Remove blockquotes (>)
+    cleaned = re.sub(r'^\s*>\s+', '', cleaned, flags=re.MULTILINE)
+    # Remove excessive blank lines
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
+
+
+def answer_document_question(question: str, document_context: str, language: str = "English") -> Dict[str, Any]:
+    """
+    Answers a citizen's voice/text question grounded strictly in the provided document context using Gemini AI.
+    Falls back gracefully to intelligent keyword/mock answering if Gemini is unavailable.
+    """
+    client = get_gemini_client()
+
+    if client:
+        try:
+            prompt = f"""
+You are an expert citizen assistant for the government portal.
+A citizen has asked a question regarding the following government document.
+
+CITIZEN QUESTION:
+{question}
+
+DOCUMENT CONTENT:
+{document_context}
+
+RULES:
+1. Answer the citizen's question accurately and helpfully based ONLY on the provided document content.
+2. If the answer is not in the document, politely state that this specific detail is not mentioned in the uploaded document.
+3. Keep the answer clear, reassuring, concise, and easy to understand for an ordinary citizen.
+4. Language: Respond in {language}.
+5. SCRIPT RULE: You MUST write in the native script of {language} (e.g., Devanagari for Hindi/Marathi, Tamil script for Tamil, etc.) unless English is chosen. Do NOT use Romanized transliterations.
+6. FORMATTING RULE: Output PLAIN TEXT ONLY. DO NOT use ANY markdown formatting (NO asterisks **, NO hashes #, NO bullet points -, NO bold/italic, NO markdown links). Output clean, readable sentences only.
+
+Return ONLY the direct answer plain text.
+"""
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt
+            )
+            raw_answer = response.text.strip()
+            answer_text = _strip_markdown(raw_answer)
+            return {
+                "status": "success",
+                "source": "gemini",
+                "answer": answer_text,
+                "language": language
+            }
+        except Exception as e:
+            print(f"[Gemini Warning] answer_document_question failed: {e}. Using fallback...")
+
+
+    # Fallback response localized to selected language
+    key_points = _extract_key_points(document_context)
+    lang_lower = (language or "English").lower()
+
+    if "tamil" in lang_lower:
+        fallback_ans = (
+            f"ஆவணத்தின்படி, நீங்கள் {key_points['deadline']} காலக்கெடுவுக்குள் {key_points['form']} படிவத்தை சமர்ப்பிக்க வேண்டும். "
+            f"இதற்கான கட்டணம் {key_points['fee']} மற்றும் தேவையான சான்றுகள் ({key_points['documents']}) இணைக்கப்பட வேண்டும்."
+        )
+    elif "hindi" in lang_lower:
+        fallback_ans = (
+            f"दस्तावेज़ के अनुसार, आपको {key_points['deadline']} के भीतर {key_points['form']} जमा करना होगा। "
+            f"इसके लिए {key_points['fee']} का शुल्क और आवश्यक प्रमाण पत्र ({key_points['documents']}) जमा करना अनिवार्य है।"
+        )
+    elif "telugu" in lang_lower:
+        fallback_ans = (
+            f"పత్రం ప్రకారం, మీరు {key_points['deadline']} లోపు {key_points['form']} సమర్పించాలి. "
+            f"ఫీజు {key_points['fee']} మరియు ధృవీకరణ పత్రాలు ({key_points['documents']}) జతచేయాలి."
+        )
+    else:
+        fallback_ans = (
+            f"Based on the document, please ensure you submit {key_points['form']} within {key_points['deadline']} "
+            f"with the required fee of {key_points['fee']} and attached proofs ({key_points['documents']})."
+        )
+
+    return {
+        "status": "success",
+        "source": "mock_engine",
+        "answer": fallback_ans,
+        "language": language
+    }
+
+

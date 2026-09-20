@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import './Modal.css'
 
 /**
@@ -38,7 +39,10 @@ export default function Modal({ open, type = 'success', title, onClose, children
 
   if (!open) return null
 
-  const icons = { success: '✓', error: '⚠' }
+  const icons = {
+    success: <CheckCircle2 size={18} strokeWidth={2.2} />,
+    error: <AlertTriangle size={18} strokeWidth={2.2} />
+  }
 
   return createPortal(
     <div
@@ -68,7 +72,7 @@ export default function Modal({ open, type = 'success', title, onClose, children
             onClick={onClose}
             aria-label="Close dialog"
           >
-            ✕
+            <X size={16} strokeWidth={2} />
           </button>
         </div>
 
