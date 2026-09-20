@@ -1,0 +1,197 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Layout: Top tricolour bar + Header + Nav
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Tricolour strip */
+.tricolour-bar {
+  height: 5px;
+  background: linear-gradient(
+    to right,
+    #FF9933 33.3%,
+    #ffffff 33.3% 66.6%,
+    #138808 66.6%
+  );
+  border-bottom: 1px solid #ddd;
+}
+
+/* ── Site header ──────────────────────────────────────────────────────────── */
+.site-header {
+  background: var(--navy);
+  color: var(--white);
+  padding: 0;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xl);
+  border-bottom: 1px solid rgba(255,255,255,.15);
+}
+
+.header-emblem {
+  font-size: 2.6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.header-titles {
+  flex: 1;
+}
+
+.header-titles .ministry {
+  font-size: 0.7rem;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.75);
+  font-weight: 500;
+}
+
+.header-titles h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 2px 0;
+}
+
+.header-titles .tagline {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,.7);
+  font-style: italic;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lang-switcher-btn {
+  background: rgba(255,255,255,.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.35);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  letter-spacing: .3px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.lang-switcher-btn:hover {
+  background: var(--saffron);
+  border-color: var(--saffron);
+}
+
+/* ── Navigation bar ───────────────────────────────────────────────────────── */
+.site-nav {
+  background: var(--navy-dark);
+  border-top: 2px solid var(--saffron);
+}
+
+.site-nav ul {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-xl);
+  margin: 0;
+  gap: 8px;
+}
+
+.site-nav a {
+  display: block;
+  color: rgba(255,255,255,.85);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-bottom: 3px solid transparent;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.site-nav a:hover,
+.site-nav a.active {
+  color: var(--white);
+  border-bottom-color: var(--saffron);
+}
+
+.nav-btn-link {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,.85);
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: color var(--transition), border-bottom-color var(--transition);
+}
+
+.nav-btn-link:hover {
+  color: var(--white);
+  border-bottom-color: var(--saffron);
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────────────────────── */
+.breadcrumb-bar {
+  background: #eef1f7;
+  border-bottom: 1px solid var(--border);
+  padding: 7px var(--space-xl);
+}
+
+.breadcrumb {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.breadcrumb li + li::before {
+  content: '›';
+  margin-right: 4px;
+}
+
+.breadcrumb a {
+  color: var(--navy);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover { text-decoration: underline; }
+.breadcrumb li:last-child { color: var(--text); font-weight: 600; }
+
+/* ── Main layout ──────────────────────────────────────────────────────────── */
+.page-wrapper {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-xl);
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.site-footer {
+  background: var(--navy-dark);
+  color: rgba(255,255,255,.65);
+  text-align: center;
+  padding: var(--space-lg) var(--space-xl);
+  font-size: 0.8rem;
+  margin-top: var(--space-xl);
+  border-top: 3px solid var(--saffron);
+}
+
+.site-footer strong { color: rgba(255,255,255,.9); }
+
+@media (max-width: 800px) {
+  .page-wrapper {
+    grid-template-columns: 1fr;
+    padding: var(--space-lg) var(--space-md);
+  }
+  .header-top { padding: var(--space-md); flex-wrap: wrap; }
+  .site-nav ul { padding: 0 var(--space-md); }
+  .breadcrumb-bar { padding: 7px var(--space-md); }
+}

@@ -1,6 +1,7 @@
 import os
 import uuid
 import re
+import base64
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
@@ -13,6 +14,8 @@ from pydantic import BaseModel, Field
 # Local services
 import aws_document_processor
 import gemini_service
+import polly_tts
+import tts
 
 # Load environment variables
 load_dotenv()
@@ -58,6 +61,7 @@ class ProcessRequest(BaseModel):
     key: Optional[str] = Field(None, description="S3 object key or filename of the document")
     s3_uri: Optional[str] = Field(None, description="Full S3 URI (s3://bucket/key) as alternative to bucket/key")
     document_id: Optional[str] = Field(None, description="Unique document ID or filename")
+
 
 
 class ExplainRequest(BaseModel):
@@ -175,7 +179,8 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     return {
         "status": "success",
-        "message": f"PDF successfully stored ({storage_mode})",
+        "testKey": f"PDF successfully stored ({storage_mode})",
+        "message": f"PDF successfully stored!",
         "filename": filename,
         "bucket": bucket_name,
         "key": s3_key,
@@ -246,12 +251,40 @@ def explain_text(request: ExplainRequest):
             text=request.text,
             language=target_lang
         )
+        simplified_text = result.get("simplified_text", "")
+
+        # Generate audio of the explanation using Amazon Polly (with automated fallback via tts module)
+        audio_base64 = None
+        audio_format = "audio/mp3"
+        audio_file_path = None
+
+        if simplified_text and simplified_text.strip():
+            try:
+                unique_audio_id = uuid.uuid4().hex[:8]
+                audio_output_path = UPLOADS_DIR / f"explain_audio_{unique_audio_id}.mp3"
+                
+                generated_path = tts.text_to_speech(
+                    text=simplified_text,
+                    language=target_lang,
+                    output_path=str(audio_output_path)
+                )
+                
+                if generated_path and os.path.exists(generated_path):
+                    audio_file_path = str(generated_path)
+                    with open(generated_path, "rb") as af:
+                        audio_base64 = base64.b64encode(af.read()).decode("utf-8")
+            except Exception as tts_err:
+                print(f"[Explain TTS Warning] Failed to generate audio: {tts_err}")
+
         return {
             "status": "success",
             "source": result.get("source", "mock_engine"),
             "language": target_lang,
-            "simplified_text": result.get("simplified_text", ""),
+            "simplified_text": simplified_text,
             "key_points": result.get("key_points", {}),
+            "audio_base64": audio_base64,
+            "audio_format": audio_format,
+            "audio_url": f"/uploads/{Path(audio_file_path).name}" if audio_file_path else None,
         }
     except Exception as e:
         raise HTTPException(

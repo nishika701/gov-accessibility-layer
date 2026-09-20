@@ -1,0 +1,85 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Global CSS Reset & Design Tokens — Government of India aesthetic
+   ───────────────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Colour palette */
+  --saffron:      #FF6200;
+  --saffron-dark: #d45200;
+  --navy:         #003580;
+  --navy-dark:    #002460;
+  --navy-light:   #e8eef8;
+  --green:        #138808;
+  --white:        #ffffff;
+  --off-white:    #f5f6f8;
+  --border:       #cdd3dc;
+  --text:         #1a1f36;
+  --text-muted:   #5c6578;
+  --error:        #c0392b;
+  --error-bg:     #fdf2f2;
+  --success:      #1a7a1a;
+  --success-bg:   #f0faf0;
+  --warning:      #805500;
+  --warning-bg:   #fffbf0;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+
+  /* Misc */
+  --radius:     4px;
+  --radius-md:  6px;
+  --shadow-sm:  0 1px 4px rgba(0,0,0,.08);
+  --shadow-md:  0 2px 12px rgba(0,0,0,.10);
+  --shadow-lg:  0 4px 24px rgba(0,0,0,.13);
+  --transition: 180ms ease;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+}
+
+body {
+  font-family: 'Segoe UI', 'Noto Sans', Arial, sans-serif;
+  background-color: var(--off-white);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--navy);
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font-family: inherit;
+}
+
+/* Utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
